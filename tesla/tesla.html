@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>carOS - Dashboard Tesla Style</title>
+    
+    <!-- Scripts do Mapbox -->
+    <script src="https://mapbox.com"></script>
+    <link href="https://mapbox.com" rel="stylesheet">
+    <link href="https://googleapis.com" rel="stylesheet">
+    
+    <style>
+        :root {
+            --tesla-dark: rgba(20, 20, 20, 0.85);
+            --tesla-blur: blur(25px);
+            --tesla-border: rgba(255, 255, 255, 0.08);
+            --tesla-blue: #3e63dd;
+        }
+        * { box-sizing: border-box; font-family: 'Inter', sans-serif; margin: 0; padding: 0; user-select: none; }
+        body, html { width: 100%; height: 100%; background-color: #0b0b0c; overflow: hidden; color: #ffffff; }
+        #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        
+        .panel-left { position: absolute; top: 24px; left: 24px; z-index: 10; background: var(--tesla-dark); backdrop-filter: var(--tesla-blur); border: 1px solid var(--tesla-border); padding: 24px; border-radius: 20px; width: 340px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
+        .gears { font-size: 22px; font-weight: 700; letter-spacing: 10px; color: rgba(255, 255, 255, 0.25); margin-bottom: 12px; }
+        .gear-active { color: var(--tesla-blue); text-shadow: 0 0 15px rgba(62, 99, 221, 0.6); }
+        .speed { font-size: 76px; font-weight: 700; letter-spacing: -2px; line-height: 1; }
+        .speed span { font-size: 16px; font-weight: 400; color: rgba(255, 255, 255, 0.4); margin-left: 6px; }
+        .divider { height: 1px; background: var(--tesla-border); margin: 20px 0; }
+        .stats-item { font-size: 14px; color: rgba(255, 255, 255, 0.8); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+        .panel-right { position: absolute; top: 24px; right: 24px; z-index: 10; background: var(--tesla-dark); backdrop-filter: var(--tesla-blur); border: 1px solid var(--tesla-border); padding: 14px 24px; border-radius: 16px; display: flex; gap: 16px; font-size: 16px; font-weight: 600; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        
+        .tesla-popup { position: absolute; bottom: 120px; left: 24px; z-index: 10; background: var(--tesla-dark); backdrop-filter: var(--tesla-blur); border: 1px solid var(--tesla-border); padding: 20px; border-radius: 20px; width: 340px; box-shadow: 0 15px 35px rgba(0,0,0,0.4); transform: translateY(30px); opacity: 0; pointer-events: none; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .tesla-popup.active { transform: translateY(0); opacity: 1; pointer-events: all; }
+        .popup-title { font-size: 16px; font-weight: 600; border-bottom: 1px solid var(--tesla-border); padding-bottom: 8px; margin-bottom: 12px; }
+        
+        .compile-btn { width: 100%; background: #1e1e24; border: 1px solid #3a3a44; color: #ffffff; padding: 12px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; }
+        .compile-btn:hover { background: var(--tesla-blue); border-color: #5856d6; }
+        
+        .dock { position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%); z-index: 10; background: rgba(15, 15, 15, 0.85); backdrop-filter: var(--tesla-blur); border: 1px solid var(--tesla-border); padding: 0 16px; height: 64px; border-radius: 32px; display: flex; gap: 12px; align-items: center; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
+        .dock-btn { width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 26px; cursor: pointer; border-radius: 50%; transition: all 0.2s ease; }
+        .dock-btn:hover { background: rgba(255, 255, 255, 0.1); transform: translateY(-4px); }
+        .dock-btn.active-tab { background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.2); }
+        
+        .alert-toast { position: absolute; top: 100px; left: 50%; transform: translateX(-50%); z-index: 100; background: #1c1c1e; border: 1px solid var(--tesla-border); color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; font-weight: 500; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; }
+        .alert-toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+
+    <!-- Elementos Visuais do Ecrã -->
+    <div id="map"></div>
+    <div id="toast" class="alert-toast">Notificação</div>
+
+    <div class="panel-left">
+        <div class="gears">P R N <span class="gear-active">D</span></div>
+        <div class="speed"><span id="speed-val">0</span><span>km/h</span></div>
+        <div class="divider"></div>
+        <div class="stats-item">🔋 <span id="battery-val">87%</span> • 412 km</div>
+        <div class="stats-item" style="color: var(--tesla-blue); font-weight: 600;">📍 Lisboa, Portugal</div>
+    </div>
+
+    <div class="panel-right">
+        <div id="clock-val">--:--</div>
+        <div style="opacity: 0.3;">|</div>
+        <div id="temp-val">21.5°C</div>
+    </div>
+
+    <div id="settings-popup" class="tesla-popup">
+        <div class="popup-title">Definições do carOS</div>
+        <p style="font-size: 13px; color: rgba(255,255,255,0.6); margin-bottom: 15px;">Descarregar o inicializador em janela limpa para o PC:</p>
+        <button class="compile-btn" onclick="descarregarInstalador()">
+            📥 Descarregar abrir_painel.bat
+        </button>
+    </div>
+
+    <div class="dock">
+        <div class="dock-btn" onclick="showPopup('settings-popup', this)">⚙️</div>
+    </div>
+
+    <!-- O JAVASCRIPT CORRETAMENTE EMBUTIDO DENTRO DA TAG SCRIPT -->
+    <script>
+        mapboxgl.accessToken = 'pk.eyJ1IjoiZmlsaXBlLXBhcCIsImEiOiJjbXVmZnJxYXMwZTVlMnlzaTNsdjMwdGZjIn0.epS4z2wca6yvO7hM4wnK7A';
+        let map;
+
+        function initTeslaSystem() {
+            startClock();
+            try {
+                map = new mapboxgl.Map({ 
+                    container: 'map', 
+                    style: 'mapbox://styles/mapbox/dark-v11', 
+                    center: [-9.1393, 38.7223], 
+                    zoom: 14, 
+                    pitch: 45, 
+                    attributionControl: false 
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        function showPopup(id, btn) {
+            const p = document.getElementById(id);
+            const active = p.classList.contains('active');
+            document.querySelectorAll('.tesla-popup').forEach(x => x.classList.remove('active'));
+            document.querySelectorAll('.dock-btn').forEach(b => b.classList.remove('active-tab'));
+            if (!active) { p.classList.add('active'); btn.classList.add('active-tab'); }
+        }
+
+        function descarregarInstalador() {
+            showNotification("📥 A descarregar abrir_painel.bat...");
+            const batContent = `@echo off\r\ntitle carOS Launcher\r\ncolor 0b\r\necho A iniciar o painel carOS em modo nativo Tesla...\r\nset "targetUrl=file:///%cd:\\=/%/tesla.html"\r\nstart "" "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" --app=%targetUrl% --start-maximized\r\nexit`;
+            
+            const blob = new Blob([batContent], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'abrir_painel.bat';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function showNotification(txt) {
+            const t = document.getElementById('toast'); t.innerText = txt; t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 4000);
+        }
+
+        function startClock() {
+            const u = () => { const n = new Date(); document.getElementById('clock-val').innerText = `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`; };
+            u(); setInterval(u, 1000);
+        }
